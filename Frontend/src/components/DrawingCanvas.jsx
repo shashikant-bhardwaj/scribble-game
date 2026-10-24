@@ -177,8 +177,8 @@ if (canvas) {
 
 
   return (
-    <div className="w-full rounded-2xl border border-slate-700 bg-slate-900 p-4">
-      <div className="mb-4 flex flex-wrap items-center gap-4">
+    <div className="w-full overflow-hidden rounded-2xl border border-[#2d2b46] bg-[#11111f] p-3 shadow-2xl sm:p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-[#29283e] pb-3">
         <label className="flex items-center gap-2 text-white">
           Color
           <input
