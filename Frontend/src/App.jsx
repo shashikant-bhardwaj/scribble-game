@@ -1,0 +1,815 @@
+import { useEffect, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import useSocket from "./hooks/useSocket.js";
+import { clearRoom, setError, setRoom } from "./features/game/gameSlice.js";
+import DrawingCanvas from "./components/DrawingCanvas.jsx";
+
+export default function App() {
+  const socket = useSocket();
+  const dispatch = useDispatch();
+
+
+  const { socketConnected, room, error } = useSelector(
+    (state) => state.game
+  );
+
+  const playerId = sessionStorage.getItem("scribblePlayerId");
+
+const isHost = room?.players?.some(
+    (player) => player.playerId === playerId && player.isHost
+);
+
+const isDrawer = room?.currentDrawer === playerId;
+
+  const [username, setUsername] = useState(
+    () => sessionStorage.getItem("scribbleUsername") || ""
+  );
+  const [roomCode, setRoomCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [wordChoices, setWordChoices] = useState([]);
+const [selectedWord, setSelectedWord] = useState("");
+const [timeLeft, setTimeLeft] = useState(60);
+const [chatMessages, setChatMessages] = useState([]);
+const [chatInput, setChatInput] = useState("");
+const [finalResults, setFinalResults] = useState(null);
+const [rematchState, setRematchState] = useState({
+    players: [],
+    readyCount: 0,
+});
+const [selectedRounds, setSelectedRounds] = useState(3);
+
+
+useEffect(() => {
+    if (!socket) return;
+
+    const handleWordChoices = (choices) => {
+        setWordChoices(Array.isArray(choices) ? choices : []);
+        setSelectedWord("");
+    };
+
+    const handleWordSelected = (data) => {
+        setSelectedWord(data.word);
+        setWordChoices([]);
+    };
+    const handleChatMessage = (message) => {
+    setChatMessages((prev) => [...prev, message]);
+};
+
+socket.on("chat:message", handleChatMessage);
+
+    socket.on("game:word-choices", handleWordChoices);
+    socket.on("game:word-selected", handleWordSelected);
+ 
+const handleCorrectGuess = (data) => {
+    setChatMessages((prev) => [
+        ...prev,
+        {
+            playerId: data.playerId,
+            username: "🎉 " + data.username,
+            message: `guessed correctly! +${data.points} points`,
+            createdAt: Date.now(),
+        },
+    ]);
+};
+
+
+socket.on("game:correct-guess", handleCorrectGuess);
+
+const handleGameFinished = (data) => {
+    setFinalResults(data);
+};
+
+socket.on("game:finished", handleGameFinished);
+
+const handleRematchState = (data) => {
+    setRematchState({
+        players: data.players || [],
+        readyCount: data.readyCount || 0,
+    });
+};
+
+const handleRematchStarted = () => {
+    setFinalResults(null);
+    setRematchState({ players: [], readyCount: 0 });
+    setWordChoices([]);
+    setSelectedWord("");
+    setChatMessages([]);
+    setChatInput("");
+    setTimeLeft(60);
+};
+
+socket.on("rematch:state", handleRematchState);
+socket.on("rematch:started", handleRematchStarted);
+
+const handleRoomClosed = () => {
+    dispatch(clearRoom());
+    setFinalResults(null);
+    setRematchState({
+        readyCount: 0,
+        players: [],
+    });
+    setWordChoices([]);
+    setChatMessages([]);
+    setTimeLeft(60);
+};
+
+socket.on("room:closed", handleRoomClosed);
+
+    return () => {
+        socket.off("game:word-choices", handleWordChoices);
+        socket.off("game:word-selected", handleWordSelected);
+        socket.off("chat:message", handleChatMessage);
+        socket.off("game:correct-guess", handleCorrectGuess);
+        socket.off("game:finished", handleGameFinished);
+        socket.off("rematch:state", handleRematchState);
+        socket.off("rematch:started", handleRematchStarted);
+        socket.off("room:closed", handleRoomClosed);
+    };
+}, [socket]);
+
+const handleStartGame = () => {
+    if (!socket?.connected) {
+        dispatch(setError("Server se connection nahi hai."));
+        return;
+    }
+
+    dispatch(setError(""));
+
+    socket.emit(
+        "game:start",
+        { rounds: selectedRounds },
+        (response) => {
+            if (!response?.success) {
+                dispatch(
+                    setError(
+                        response?.message || "Game start nahi ho paya."
+                    )
+                );
+            }
+        }
+    );
+};
+
+const handleRequestRematch = () => {
+    if (!socket?.connected) {
+        dispatch(setError("Server se connection nahi hai."));
+        return;
+    }
+
+    socket.emit("rematch:request", (response) => {
+        if (!response?.success) {
+            dispatch(
+                setError(response?.message || "Play Again request failed.")
+            );
+        }
+    });
+};
+
+const handleStartRematch = () => {
+    if (!socket?.connected) {
+        dispatch(setError("Server se connection nahi hai."));
+        return;
+    }
+
+    socket.emit("rematch:start", (response) => {
+        if (!response?.success) {
+            dispatch(
+                setError(response?.message || "Rematch start nahi ho paya.")
+            );
+        }
+    });
+};
+
+
+
+  const runRoomAction = (eventName, payload = {}) => {
+    if (!socket?.connected) {
+      dispatch(setError("Server se connection nahi hai. Please wait."));
+      return;
+    }
+
+    if (!username.trim()) {
+      dispatch(setError("Pehle apna username enter karo."));
+      return;
+    }
+
+    setLoading(true);
+    dispatch(setError(""));
+
+    socket.emit(
+      eventName,
+      { ...payload, username: username.trim() },
+      (response) => {
+        setLoading(false);
+
+        if (!response?.success) {
+          dispatch(
+            setError(response?.message || "Request failed. Please try again.")
+          );
+          return;
+        }
+
+        sessionStorage.setItem("scribbleUsername", username.trim());
+
+        if (response.data) {
+          dispatch(setRoom(response.data));
+        }
+      }
+    );
+  };
+
+  
+const leaveRoom = () => {
+    if (!socket?.connected) {
+        dispatch(setError("Server se connection nahi hai."));
+        return;
+    }
+
+    setLoading(true);
+
+    socket.emit("room:leave", {}, (response) => {
+        setLoading(false);
+
+        if (!response?.success) {
+            dispatch(
+                setError(response?.message || "Room leave nahi ho paya.")
+            );
+        }
+    });
+
+    dispatch(clearRoom());
+};
+
+
+  const copyRoomCode = async () => {
+    if (!room?.roomCode) return;
+
+    try {
+      await navigator.clipboard.writeText(room.roomCode);
+      dispatch(setError(""));
+    } catch {
+      dispatch(setError("Room code copy nahi hua. Use manually copy karo."));
+    }
+  };
+
+
+  useEffect(() => {
+    if (room?.status !== "drawing" || !room?.turnEndsAt) {
+        setTimeLeft(60);
+        return;
+    }
+
+    const updateTimer = () => {
+        const remaining = Math.max(
+            0,
+            Math.ceil((room.turnEndsAt - Date.now()) / 1000)
+        );
+
+        setTimeLeft(remaining);
+    };
+
+    updateTimer();
+
+    const intervalId = setInterval(updateTimer, 250);
+
+    return () => clearInterval(intervalId);
+}, [room?.status, room?.turnEndsAt]);
+
+  
+return (
+    <div className="min-h-screen bg-slate-950 px-4 py-8 text-white sm:px-8">
+        <header className="mx-auto flex max-w-5xl items-center justify-between">
+            <h1 className="text-2xl font-black tracking-tight text-indigo-400 sm:text-3xl">
+                Scribble<span className="text-white">Play</span>
+            </h1>
+
+            <div className="flex items-center gap-2 rounded-full border border-slate-700 px-3 py-2 text-sm">
+                <span
+                    className={`h-2.5 w-2.5 rounded-full ${
+                        socketConnected ? "bg-green-400" : "bg-red-400"
+                    }`}
+                />
+                {socketConnected ? "Connected" : "Connecting..."}
+            </div>
+        </header>
+
+        <main className="mx-auto mt-12 max-w-5xl">
+            {error && (
+                <div
+                    role="alert"
+                    className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+                >
+                    {error}
+                </div>
+            )}
+
+            {!room ? (
+                <section className="mx-auto max-w-xl rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl sm:p-10">
+                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-400">
+                        Draw · Guess · Win
+                    </p>
+
+                    <h2 className="mt-3 text-3xl font-bold sm:text-4xl">
+                        Ready to doodle?
+                    </h2>
+
+                    <p className="mt-3 leading-7 text-slate-400">
+                        Apna naam choose karo aur friends ke saath drawing aur guessing game khelo.
+                    </p>
+
+                    <label
+                        htmlFor="username"
+                        className="mt-8 block text-sm font-semibold text-slate-200"
+                    >
+                        Your username
+                    </label>
+
+                    <input
+                        id="username"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                runRoomAction("matchmaking:join");
+                            }
+                        }}
+                        maxLength={20}
+                        placeholder="Enter your name..."
+                        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                    />
+
+                    <button
+                        onClick={() => runRoomAction("room:create", { type: "private" })}
+                        disabled={loading || !socketConnected}
+                        className="mt-5 w-full rounded-xl bg-indigo-600 px-4 py-3 font-bold transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {loading ? "Please wait..." : "Create Private Room"}
+                    </button>
+
+                    <div className="my-6 flex items-center gap-4">
+                        <div className="h-px flex-1 bg-slate-700" />
+                        <span className="text-sm text-slate-500">OR JOIN A ROOM</span>
+                        <div className="h-px flex-1 bg-slate-700" />
+                    </div>
+
+                    <div className="flex gap-3">
+                        <input
+                            value={roomCode}
+                            onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                    runRoomAction("room:join", {
+                                        roomCode: roomCode.trim().toUpperCase(),
+                                    });
+                                }
+                            }}
+                            placeholder="Enter room code"
+                            className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 uppercase outline-none focus:border-indigo-500"
+                        />
+
+                        <button
+                            onClick={() =>
+                                runRoomAction("room:join", {
+                                    roomCode: roomCode.trim().toUpperCase(),
+                                })
+                            }
+                            disabled={loading || !socketConnected || !roomCode.trim()}
+                            className="rounded-xl border border-indigo-500 px-5 py-3 font-bold text-indigo-300 transition hover:bg-indigo-500/10 disabled:opacity-50"
+                        >
+                            Join
+                        </button>
+                    </div>
+
+                    <button
+                        onClick={() => runRoomAction("matchmaking:join")}
+                        disabled={loading || !socketConnected}
+                        className="mt-4 w-full rounded-xl border border-slate-700 px-4 py-3 font-semibold transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
+                    >
+                        Quick Match
+                    </button>
+                </section>
+            ) : finalResults ? (
+                // FINAL WINNER SCREEN
+                <section className="mx-auto max-w-2xl rounded-3xl border border-amber-400/30 bg-slate-900 p-6 shadow-2xl sm:p-10">
+                    <div className="text-center">
+                        <div className="text-6xl">🏆</div>
+
+                        <p className="mt-4 text-sm font-bold uppercase tracking-[0.25em] text-amber-400">
+                            ScribblePlay Champion
+                        </p>
+
+                        <h2 className="mt-3 text-4xl font-black sm:text-5xl">
+                            Game Over!
+                        </h2>
+
+                        {finalResults.winner ? (
+                            <>
+                                <p className="mt-6 text-slate-400">
+                                    Congratulations to
+                                </p>
+
+                                <h3 className="mt-2 text-3xl font-black text-amber-400 sm:text-4xl">
+                                    👑 {finalResults.winner.username}
+                                </h3>
+
+                                <p className="mt-3 text-xl font-bold text-green-400">
+                                    {finalResults.winner.score} points
+                                </p>
+                            </>
+                        ) : (
+                            <p className="mt-6 text-slate-300">
+                                Game finished, but no winner could be determined.
+                            </p>
+                        )}
+
+                        <p className="mt-3 text-sm text-slate-400">
+                           All {room.maxRounds} rounds completed!
+                        </p>
+                    </div>
+
+                    <div className="mt-10">
+                        <h3 className="text-xl font-bold">
+                            🏅 Final Leaderboard
+                        </h3>
+
+                        <div className="mt-4 space-y-3">
+                            {[...(finalResults.leaderboard || [])]
+                                .sort((a, b) => {
+                                    const scoreDifference = b.score - a.score;
+
+                                    if (scoreDifference !== 0) {
+                                        return scoreDifference;
+                                    }
+
+                                    if (a.playerId === finalResults.winner?.playerId) {
+                                        return -1;
+                                    }
+
+                                    if (b.playerId === finalResults.winner?.playerId) {
+                                        return 1;
+                                    }
+
+                                    return 0;
+                                })
+                                .map((player, index) => {
+                                    const isWinner =
+                                        player.playerId === finalResults.winner?.playerId;
+
+                                    return (
+                                        <div
+                                            key={player.playerId}
+                                            className={`flex items-center justify-between gap-3 rounded-xl border p-4 ${
+                                                isWinner
+                                                    ? "border-amber-400/50 bg-amber-400/10"
+                                                    : "border-slate-700 bg-slate-950"
+                                            }`}
+                                        >
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <span className="text-lg font-black text-slate-400">
+                                                    #{index + 1}
+                                                </span>
+
+                                                <div className="min-w-0">
+                                                    <p className="break-words font-semibold">
+                                                        {player.username}
+                                                        {isWinner && (
+                                                            <span className="ml-2 text-amber-400">
+                                                                👑 Winner
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <span className="shrink-0 font-bold text-green-400">
+                                                {player.score} pts
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                    </div>
+
+                    <p className="mt-8 text-center text-sm text-slate-400">
+                        Thanks for playing ScribblePlay! 🎨
+                    </p>
+
+                    <div className="mt-6 flex flex-col items-center gap-4">
+    <button
+        onClick={handleRequestRematch}
+        disabled={!socketConnected}
+        className="w-full rounded-xl bg-indigo-600 px-6 py-3 font-bold hover:bg-indigo-500 disabled:opacity-50 sm:w-auto"
+    >
+        Play Again
+    </button>
+
+    <p className="text-sm text-slate-400">
+        Players ready: {rematchState.readyCount}
+    </p>
+
+    {isHost && (
+        <button
+            onClick={handleStartRematch}
+            disabled={!socketConnected || rematchState.readyCount < 2}
+            className="w-full rounded-xl bg-green-600 px-6 py-3 font-bold hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+        >
+            Start Rematch
+        </button>
+    )}
+
+    <p className="text-center text-xs text-slate-500">
+        At least 2 players must click Play Again. Only ready players will join the next game.
+    </p>
+
+    {rematchState.players.length > 0 && (
+        <div className="w-full rounded-xl border border-slate-700 p-4">
+            <h4 className="mb-3 font-semibold">Ready for rematch</h4>
+
+            {rematchState.players.map((player) => (
+                <p key={player.playerId} className="py-1 text-sm text-green-400">
+                    ✓ {player.username}
+                    {player.isHost ? " (Host)" : ""}
+                </p>
+            ))}
+        </div>
+    )}
+</div>
+                </section>
+            ) : (
+                // EXISTING LOBBY AND GAME SCREEN
+                <section className="rounded-3xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <p className="text-sm font-semibold uppercase tracking-widest text-green-400">
+                                Room created
+                            </p>
+
+                           
+<h2 className="mt-2 text-3xl font-bold">
+    {room.status === "waiting"
+        ? "Waiting Lobby"
+        : room.status === "finished"
+          ? "Game Finished"
+          : `Round ${room.round} of ${room.maxRounds}`}
+</h2>
+
+
+                            <p className="mt-2 text-slate-400">
+                                {room.status === "waiting"
+                                    ? "Friends ko room code share karo."
+                                    : "Draw · Guess · Win"}
+                            </p>
+                        </div>
+
+                        <button
+                            onClick={leaveRoom}
+                            disabled={loading}
+                            className="rounded-xl border border-red-500/40 px-4 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                        >
+                            Leave Room
+                        </button>
+                    </div>
+
+                    <div className="mt-7 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-700 bg-slate-950 p-5">
+                        <div>
+                            <p className="text-sm text-slate-400">Room Code</p>
+                            <p className="mt-1 text-3xl font-black tracking-[0.2em] text-indigo-300">
+                                {room.roomCode || "N/A"}
+                            </p>
+                        </div>
+
+                        <button
+                            onClick={copyRoomCode}
+                            className="rounded-xl bg-indigo-600 px-4 py-3 font-semibold hover:bg-indigo-500"
+                        >
+                            Copy Code
+                        </button>
+                    </div>
+
+                    <div className="mt-8">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-xl font-bold">Players</h3>
+                            <span className="text-sm text-slate-400">
+                                {room.players?.length || 0}/{room.maxPlayers || 8}
+                            </span>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                            {(room.players || []).map((player) => (
+                                <div
+                                    key={player.playerId}
+                                    className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 p-4"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-500/20 font-bold text-indigo-300">
+                                            {player.username?.charAt(0).toUpperCase() || "P"}
+                                        </div>
+
+                                        <div>
+                                            <p className="font-semibold">{player.username}</p>
+
+                                            {player.isHost && (
+                                                <p className="text-xs text-amber-400">
+                                                    Room Host
+                                                </p>
+                                            )}
+
+                                            <p className="text-sm font-semibold text-green-400">
+                                                {player.score ?? 0} pts
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <span
+                                        className={`text-xs ${
+                                            player.connected
+                                                ? "text-green-400"
+                                                : "text-slate-500"
+                                        }`}
+                                    >
+                                        {player.connected ? "Online" : "Reconnecting..."}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="mt-8 flex flex-col items-center gap-4">
+                    {room.status === "waiting" && isHost && (
+    <div className="w-full max-w-xs">
+        <label
+            htmlFor="rounds"
+            className="mb-2 block text-sm font-semibold text-slate-300"
+        >
+            Number of Rounds
+        </label>
+
+        <select
+            id="rounds"
+            value={selectedRounds}
+            onChange={(e) =>
+                setSelectedRounds(Number(e.target.value))
+            }
+            disabled={loading || !socketConnected}
+            className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
+        >
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((round) => (
+                <option key={round} value={round}>
+                    {round} {round === 1 ? "Round" : "Rounds"}
+                </option>
+            ))}
+        </select>
+    </div>
+)}
+                        {room.status === "waiting" && isHost && (
+                            <button
+                                onClick={handleStartGame}
+                                disabled={
+                                    loading ||
+                                    !socketConnected ||
+                                    room.players?.filter((p) => p.connected).length < 2
+                                }
+                                className="rounded-xl bg-green-600 px-8 py-3 font-bold text-white transition hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Start Game
+                            </button>
+                        )}
+
+                        {room.status === "waiting" && (
+                            <p className="text-center text-sm text-slate-400">
+                                Host game start kar sakta hai. Kam se kam 2 players chahiye.
+                            </p>
+                        )}
+
+                        {room.status === "choosing" && (
+                            <div className="w-full rounded-2xl border border-indigo-500/30 bg-indigo-500/10 p-5">
+                                <h3 className="text-xl font-bold text-indigo-300">
+                                    {isDrawer
+                                        ? "Choose a word!"
+                                        : "Drawer is choosing a word..."}
+                                </h3>
+
+                                {isDrawer && wordChoices.length > 0 && (
+                                    <div className="mt-4 flex flex-wrap gap-3">
+                                        {wordChoices.map((word) => (
+                                            <button
+                                                key={word}
+                                                onClick={() => {
+                                                    socket.emit(
+                                                        "game:choose-word",
+                                                        { word },
+                                                        (response) => {
+                                                            if (!response?.success) {
+                                                                dispatch(
+                                                                    setError(
+                                                                        response?.message ||
+                                                                            "Word select nahi ho paya."
+                                                                    )
+                                                                );
+                                                            }
+                                                        }
+                                                    );
+                                                }}
+                                                className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold hover:bg-indigo-500"
+                                            >
+                                                {word}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {(room.status === "drawing" ||
+                            room.status === "round-ended") && (
+                            <>
+                                {room.status === "round-ended" && (
+                                    <div className="mb-4 rounded-xl bg-red-100 p-4 text-center font-bold text-red-700">
+                                        ⏰ Time&apos;s Up! Round has ended.
+                                    </div>
+                                )}
+
+                                {room.status === "drawing" && (
+                                    <div className="mb-4 text-center text-2xl font-bold">
+                                        ⏱️ Time Left: {timeLeft}s
+                                    </div>
+                                )}
+
+                                <DrawingCanvas
+                                    socket={socket}
+                                    isDrawer={isDrawer && room.status === "drawing"}
+                                />
+
+                                <div className="mt-6 w-full rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                                    <h3 className="mb-3 text-lg font-bold text-gray-800">
+                                        💬 Guessing Chat
+                                    </h3>
+
+                                    <div className="mb-4 flex h-64 flex-col gap-2 overflow-y-auto rounded-lg bg-gray-50 p-3">
+                                        {chatMessages.map((msg, index) => (
+                                            <p
+                                                key={`${msg.createdAt}-${index}`}
+                                                className="break-words text-sm text-gray-800"
+                                            >
+                                                <span className="font-semibold text-indigo-600">
+                                                    {msg.username}:
+                                                </span>{" "}
+                                                {msg.message}
+                                            </p>
+                                        ))}
+                                    </div>
+
+                                    <form
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+
+                                            const message = chatInput.trim();
+
+                                            if (!message || !socket) return;
+
+                                            socket.emit(
+                                                "chat:guess",
+                                                { message },
+                                                (response) => {
+                                                    if (!response?.success) {
+                                                        dispatch(
+                                                            setError(
+                                                                response?.message ||
+                                                                    "Message send nahi hua"
+                                                            )
+                                                        );
+                                                    }
+                                                }
+                                            );
+
+                                            setChatInput("");
+                                        }}
+                                        className="flex gap-2"
+                                    >
+                                        <input
+                                            type="text"
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            maxLength={100}
+                                            placeholder="Guess the word..."
+                                            className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-black outline-none focus:border-indigo-500"
+                                        />
+
+                                        <button
+                                            type="submit"
+                                            className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700"
+                                        >
+                                            Send
+                                        </button>
+                                    </form>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </section>
+            )}
+        </main>
+    </div>
+);
+
+}
