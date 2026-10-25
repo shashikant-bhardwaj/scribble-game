@@ -933,6 +933,40 @@ if (nextRoom.status === "finished") {
 
             }
 
+                    socket.on("drawing:fill", (payload = {}) => {
+            const room = getPlayerRoom(playerId);
+
+            if (!room) return;
+
+            // Only the current drawer can fill, and only while drawing.
+            if (room.status !== "drawing" || room.currentDrawer !== playerId) {
+                return;
+            }
+
+            const { x, y, color } = payload;
+
+            // Canvas is 900x500, so reject points outside it.
+            if (
+                !Number.isFinite(x) ||
+                !Number.isFinite(y) ||
+                x < 0 ||
+                x > 900 ||
+                y < 0 ||
+                y > 500 ||
+                typeof color !== "string" ||
+                !/^#[0-9a-fA-F]{6}$/.test(color)
+            ) {
+                return;
+            }
+
+            socket.to(room.roomCode).emit("drawing:fill", {
+                playerId,
+                x,
+                y,
+                color,
+            });
+        });
+
 
 
             socket.to(room.roomCode).emit("drawing:start", {

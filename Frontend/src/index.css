@@ -1,4 +1,4 @@
-
+/* 
 @import "tailwindcss";
 
 * {
@@ -11,3 +11,56 @@ body {
     min-height: 100vh;
     font-family: Arial, sans-serif;
 }
+
+ */
+
+
+
+
+
+
+
+
+
+
+ @import url("https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    font-family: "Fredoka", "Trebuchet MS", Arial, sans-serif;
+    color: #1e293b;
+    background-color: #bfdbfe;
+    background-image:
+        radial-gradient(circle at 20px 20px, rgba(255, 255, 255, 0.55) 3px, transparent 4px),
+        radial-gradient(circle at 60px 60px, rgba(255, 255, 255, 0.35) 5px, transparent 6px),
+        linear-gradient(160deg, #dbeafe 0%, #bfdbfe 45%, #c7d2fe 100%);
+    background-size: 80px 80px, 80px 80px, 100% 100%;
+    background-attachment: fixed;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: not-allowed;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+}
+
+
+
