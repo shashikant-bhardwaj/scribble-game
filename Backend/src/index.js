@@ -5,6 +5,10 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { registerSocketHandlers } from "./socket/index.js";
 
+
+
+
+
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = "http://localhost:5173";
 
